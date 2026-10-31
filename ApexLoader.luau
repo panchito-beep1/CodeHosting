@@ -1,3 +1,5 @@
+--hero there
+
 local games = {
     [137422132461457] = {
     Name = "Guess The Flag",     
@@ -5,15 +7,15 @@ local games = {
   },
     [3398014311] = {
     Name = "Restaurant Tycoon 2",     
-    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/GuessTheflagApex.luau"
+    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/RestaurantTycoon2Apex.luau"
   },
     [537413528] = {
     Name = "Build A Boat For Treasure",     
-    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/GuessTheflagApex.luau"
+    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/BuildABoatApex.luau"
   },
     [6516141723] = {
     Name = "DOORS",     
-    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/GuessTheflagApex.luau"
+    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/DoorsApex.luau"
   },
 }
 

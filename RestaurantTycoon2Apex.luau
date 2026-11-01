@@ -85,6 +85,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     end
 end)
 
+local plotWaitStart = os.clock()
 repeat
     task.wait()
     for _, tycoon in pairs(Workspace.Tycoons:GetChildren()) do
@@ -93,11 +94,34 @@ repeat
             break
         end
     end
+    if not getgenv().PlayerPlot and os.clock() - plotWaitStart > 15 then
+        warn("[Script Info]: Could not find your restaurant plot after 15s. Make sure you're fully loaded into the game, then re-execute.")
+        return
+    end
 until getgenv().PlayerPlot
 
 local plot = getgenv().PlayerPlot
+
+local statsWaitStart = os.clock()
+while not (plot:FindFirstChild("Stats") and plot.Stats:FindFirstChild("IsLoading")) do
+    task.wait()
+    if os.clock() - statsWaitStart > 10 then
+        warn("[Script Info]: Could not find plot.Stats.IsLoading — the game hasn't finished initializing your plot. Re-execute in a moment.")
+        return
+    end
+end
+
 if plot.Stats.IsLoading.Value then
-    repeat task.wait() until not plot.Stats.IsLoading.Value
+    warn("[Script Info]: Your restaurant is still loading. Waiting up to 60 seconds...")
+    local loadWaitStart = os.clock()
+    repeat
+        task.wait()
+        if os.clock() - loadWaitStart > 60 then
+            warn("[Script Info]: Restaurant took longer than 60s to load. Aborting — load your restaurant first, then re-execute.")
+            return
+        end
+    until not plot.Stats.IsLoading.Value
+    print("[Script Info]: Restaurant loaded successfully.")
 end
 
 getgenv().settingsTable = {

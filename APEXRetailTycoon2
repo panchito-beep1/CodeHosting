@@ -1,0 +1,541 @@
+local Axiom = loadstring(game:HttpGet("https://raw.githubusercontent.com/panchito-beep1/Axiom/refs/heads/main/AxiomV6"))()
+
+local win = Axiom.new({
+    Title = "Retail Tycoon 2 | Apex | 1.0",
+    Size = UDim2.new(0, 580, 0, 600)
+})
+
+win:EnableStateSaving({ Folder = "APEXRT2", Filename = "config.json" })
+
+local FarmTogs = {
+    AutoStock = false,
+    ReassignShelf = false,
+    AutoPurchase = false,
+    AutoArrest = false,
+    AutoEmpty = false,
+    PurchaseHighToLow = true
+}
+
+local ShoppingList = {}
+local BuyQty = 20
+local DeliveryBusy = false
+local StockDelay = 5
+local PurchaseDelay = 10
+local RestockThreshold = 5
+
+local VehicleMods = {
+    MaxSpeed = 100,
+    MaxSpeedRev = 30,
+    Power = 20,
+    Torque = 0.225,
+    BrakePower = 30,
+    MaxTurnAngle = 45
+}
+local ModsOn = false
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Player = Players.LocalPlayer
+local Plots = workspace.Map.Plots
+local MyPlot = getrenv()._G.Plot
+
+local GameData = require(ReplicatedStorage.GameData)
+
+local RemotesFold = ReplicatedStorage.Remotes
+local RestockShelfFunction = RemotesFold.RestockShelfFunction
+local StockShelfFunction = RemotesFold.StockShelfFunction
+local EmptyShelfFunction = RemotesFold.EmptyShelfFunction
+local BuyStorage = RemotesFold.BuyStorage
+local SpawnVehicle = RemotesFold.SpawnVehicle
+local LoadVehicle = RemotesFold.LoadVehicle
+local UnloadVehicle = RemotesFold.UnloadVehicle
+
+local function MyTruck()
+    return workspace.PlayerVehicles:FindFirstChild("Vehicle_" .. Player.Name)
+end
+
+local function MyBay()
+    return workspace.Map.Landmarks["Loading Dock"]:FindFirstChild("LoadingDock_" .. MyPlot.Name:sub(6))
+end
+
+local BuyPrice = {}
+local BuyOptions = {}
+for _, e in pairs(GameData.Sellables) do
+    BuyPrice[e.Name] = e.BuyPrice
+    table.insert(BuyOptions, e.Name)
+end
+table.sort(BuyOptions, function(a, b) return BuyPrice[a] < BuyPrice[b] end)
+
+local Accepts = {}
+local StorageKey = {}
+for _, cat in pairs(GameData.Objects) do
+    for _, obj in pairs(cat) do
+        for _, v in pairs(obj.Variants) do
+            if type(v.Sellables) == "table" then
+                local set = {}
+                for _, item in ipairs(v.Sellables) do
+                    if item ~= "Empty" then set[item] = true end
+                end
+                Accepts[v.Name] = set
+            end
+        end
+    end
+end
+for i, v in pairs(GameData.Sellables) do
+    for i, item in pairs(v.Variants) do
+        StorageKey[item] = v.Name
+    end
+end
+
+local BinNames = {}
+for i, cat in pairs(GameData.Objects) do
+    for i, obj in pairs(cat) do
+        if obj.Name == "Trash Can" or obj.Name == "Dumpster" then
+            for i, v in pairs(obj.Variants) do
+                BinNames[v.Name] = true
+            end
+        end
+    end
+end
+
+local function StockAllShelves()
+    MyPlot = getrenv()._G.Plot
+    local CurrentStock = getrenv()._G.Data["Storage"]
+
+    local Refill = {}
+    for _, floor in ipairs(MyPlot.Objects:GetChildren()) do
+        for _, m in ipairs(floor:GetChildren()) do
+            local Sellable = m:FindFirstChild("Sellable")
+            local SellableAmount = m:FindFirstChild("SellableAmount")
+            if Sellable and SellableAmount then
+                local dead = FarmTogs.ReassignShelf and Sellable.Value ~= "Empty" and SellableAmount.Value == 0 and (CurrentStock[StorageKey[Sellable.Value] or 0]) == 0
+                local needsTopOff = Sellable.Value ~= "Empty" and SellableAmount.Value <= RestockThreshold
+                
+                if Sellable.Value == "Empty" or dead then
+                    local best, bestN
+                    for item in pairs(Accepts[m.Name] or {}) do
+                        local n = CurrentStock[StorageKey[item]] or 0
+                        if n > 0 and (not bestN or n > bestN) then
+                            best, bestN = item, n
+                        end
+                    end
+                    if best then
+                        StockShelfFunction:InvokeServer({m}, {best})
+                        table.insert(Refill, m)
+                    end
+                elseif needsTopOff then
+                    table.insert(Refill, m)
+                end
+            end
+        end
+    end
+
+    for i, m in ipairs(Refill) do
+        RestockShelfFunction:InvokeServer({m})
+    end
+end
+
+local function BiggestOwned()
+    local bestk, bestc
+    for key in pairs(getrenv()._G.Data.Vehicles) do
+        local v = GameData.Vehicles[tonumber(key)]
+        if v and v.Cargo > 0 and (not bestc or v.Cargo > bestc) then
+            bestk, bestc = tonumber(key), v.Cargo
+        end
+    end
+    return bestk
+end
+
+local function UnloadCFrame()
+    for i, f in ipairs(getrenv()._G.Plot.Walls:GetChildren()) do
+        for i, w in ipairs(f:GetChildren()) do
+            local t = w:FindFirstChild("Type")
+            if t and (t.Value == "TruckDoor" or t.Value == "TruckDoor2") then
+                return w.PrimaryPart.CFrame * CFrame.new(0, 4, 12)
+            end
+        end
+    end
+end
+
+local function MoveTruck(to)
+    local truck = MyTruck()
+    if not truck then return false end
+    truck:PivotTo(to)
+    truck.PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+    truck.PrimaryPart.AssemblyAngularVelocity = Vector3.zero
+    return true
+end
+
+local function SitInTruck()
+    local truck = MyTruck()
+    if not truck then return false end
+    local hum = Player.Character:FindFirstChildOfClass("Humanoid")
+    local seat = truck:FindFirstChild("DriveSeat")
+    if not seat then return false end
+    if hum.SeatPart and hum.SeatPart.Parent == truck then return true end
+    Player.Character.HumanoidRootPart.CFrame = seat.CFrame * CFrame.new(0, 3, 0)
+    task.wait(0.6)
+    fireproximityprompt(seat.Prompt)
+    task.wait(1)
+    return hum.SeatPart ~= nil
+end
+
+local function EnsureTruck()
+    local truck = MyTruck()
+    if truck then return truck end
+    local key = BiggestOwned()
+    if not key then return nil, "No cargo vehicle owned" end
+    SpawnVehicle:InvokeServer(key, UnloadCFrame())
+    for _ = 1, 20 do
+        task.wait(0.25)
+        truck = MyTruck()
+        if truck then return truck end
+    end
+    return nil, "Spawn timed out"
+end
+
+local function BuyStock()
+    local order = table.clone(ShoppingList)
+    if FarmTogs.PurchaseHighToLow then
+        table.sort(order, function(a, b) return BuyPrice[a] > BuyPrice[b] end)
+    end
+    for i, name in ipairs(order) do
+        if getrenv()._G.Data.Cash >= BuyPrice[name] * BuyQty then
+            BuyStorage:InvokeServer(name, BuyQty, false)
+        end
+    end
+end
+
+local function RunPurchase()
+    local truck, err = EnsureTruck()
+    if not truck then win:Notify({ Title = "Error", Description = err, Type = "error" }) return end
+
+    if not SitInTruck() then
+        win:Notify({ Title = "Error", Description = "Could not get in the vehicle", Type = "error" })
+        return
+    end
+
+    local bay = MyBay()
+    if not bay then win:Notify({ Title = "Error", Description = "No loading bay", Type = "error" }) return end
+    if not UnloadCFrame() then win:Notify({ Title = "Error", Description = "No TruckDoor", Type = "error" }) return end
+
+    BuyStock()
+
+    MoveTruck(bay.LoadingSpot.CFrame * CFrame.new(0, 4, 0))
+    task.wait(2.5)
+    LoadVehicle:InvokeServer()
+
+    local d = getrenv()._G.Data
+    local cargo = (d.VehicleCurrentStorage or {})[Player.Name] or 0
+
+    if (d.MaxStorage or 0) - (d.CurrentStorage or 0) <= 0 then
+        win:Notify({ Title = "Store Full", Description = "Cargo stays in truck", Type = "warn" })
+        return
+    end
+
+    MoveTruck(UnloadCFrame())
+    task.wait(2.5)
+    UnloadVehicle:InvokeServer()
+end
+
+local function MyBins()
+    local bins = {}
+    for i, floor in ipairs(getrenv()._G.Plot.Objects:GetChildren()) do
+        for i, m in ipairs(floor:GetChildren()) do
+            if BinNames[m.Name] then
+                table.insert(bins, m)
+            end
+        end
+    end
+    return bins
+end
+
+local function EmptyBin(bin)
+    local prompt = bin:FindFirstChild("EmptyPrompt", true)
+    if not prompt then return false end
+    if tonumber(prompt.ObjectText:match("(%d+)%s*/")) == 0 then return false end
+    local base = bin:FindFirstChild("Base") or bin.PrimaryPart
+    Player.Character.HumanoidRootPart.CFrame = base.CFrame * CFrame.new(0, 4, 4)
+    task.wait(0.4)
+    fireproximityprompt(prompt)
+    return true
+end
+
+local function OnMyPlot(pos)
+    local l = getrenv()._G.Plot.PrimaryPart.CFrame:PointToObjectSpace(pos)
+    return l.x >= 0 and l.x <= (GameData.xTileAmount + 1) * GameData.TileSize and -l.z >= -40 and -l.z <= (GameData.zTileAmount + 1) * GameData.TileSize
+end
+
+local function MyRobbers()
+    local out = {}
+    local container = workspace:FindFirstChild("NPCModel")
+    if not container then return out end
+    for i, npc in ipairs(container:GetChildren()) do
+        local prompt = npc:FindFirstChild("ArrestPrompt")
+        local root = npc.PrimaryPart
+        if prompt and prompt.Enabled and root and OnMyPlot(root.Position) then
+            table.insert(out, npc)
+        end
+    end
+    return out
+end
+
+local function ArrestRobber(npc)
+    local prompt = npc:FindFirstChild("ArrestPrompt")
+    local root = npc.PrimaryPart or npc:FindFirstChild("HumanoidRootPart")
+    if not prompt or not prompt.Enabled or not root then return false end
+    Player.Character.HumanoidRootPart.CFrame = root.CFrame * CFrame.new(0, 0, 4)
+    task.wait(0.4)
+    fireproximityprompt(prompt)
+    return true
+end
+
+local function ApplyMods()
+    local t = MyTruck()
+    if not t or not ModsOn then return end
+    for k, v in pairs(VehicleMods) do
+        local n = t.Config:FindFirstChild(k)
+        if n then n.Value = v end
+    end
+end
+
+workspace.PlayerVehicles.ChildAdded:Connect(function(m)
+    if m.Name == "Vehicle_" .. Player.Name then
+        task.wait(0.5)
+        ApplyMods()
+    end
+end)
+
+local mainTab = win:AddTab({ Name = "Dashboard" })
+
+local statsDiv = mainTab:AddDivision({ Title = "Live Stats" })
+local cashLabel = statsDiv:AddLabel({ Text = "Cash: Loading..." })
+local storageLabel = statsDiv:AddLabel({ Text = "Storage: Loading..." })
+local cargoLabel = statsDiv:AddLabel({ Text = "Cargo: Loading..." })
+
+task.spawn(function()
+    while task.wait(0.5) do
+        local d = getrenv()._G.Data
+        if d then
+            cashLabel:SetText("Cash: <font color='#5FD38D'>$" .. tostring(d.Cash or 0) .. "</font>")
+            storageLabel:SetText("Storage: <font color='#FACC15'>" .. tostring(d.CurrentStorage or 0) .. " / " .. tostring(d.MaxStorage or 0) .. "</font>")
+            local cargo = (d.VehicleCurrentStorage or {})[Player.Name] or 0
+            cargoLabel:SetText("Cargo: <font color='#60A5FA'>" .. tostring(cargo) .. "</font>")
+        end
+    end
+end)
+
+local stockDiv = mainTab:AddDivision({ Title = "Auto Stock" })
+stockDiv:AddCheckbox({ Text = "Enabled", Default = false, StateKey = "autoStock", Callback = function(bool)
+    FarmTogs.AutoStock = bool
+    if bool then
+        task.spawn(function()
+            while FarmTogs.AutoStock do
+                StockAllShelves()
+                task.wait(StockDelay)
+            end
+        end)
+    end
+end })
+stockDiv:AddCheckbox({ Text = "Auto Reassign Shelf", Default = false, StateKey = "reassignShelf", Callback = function(bool)
+    FarmTogs.ReassignShelf = bool
+end })
+stockDiv:AddSlider({ Text = "Restock Threshold", Min = 0, Max = 10, Default = 5, StateKey = "restockThreshold", Callback = function(v)
+    RestockThreshold = v
+end })
+stockDiv:AddSlider({ Text = "Stock Delay", Min = 1, Max = 20, Default = 5, StateKey = "stockDelay", Callback = function(v)
+    StockDelay = v
+end })
+
+local purchaseDiv = mainTab:AddDivision({ Title = "Auto Purchase" })
+purchaseDiv:AddCheckbox({ Text = "Enabled", Default = false, StateKey = "autoPurchase", Callback = function(bool)
+    FarmTogs.AutoPurchase = bool
+    if bool then
+        task.spawn(function()
+            while FarmTogs.AutoPurchase do
+                DeliveryBusy = true
+                pcall(RunPurchase)
+                local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+                if hum and hum.SeatPart then hum.Sit = false end
+                DeliveryBusy = false
+                task.wait(PurchaseDelay)
+            end
+        end)
+    end
+end })
+purchaseDiv:AddMultiSelectSearchableDropdown({
+    Text = "Stock to Buy",
+    Items = BuyOptions,
+    StateKey = "shoppingList",
+    Callback = function(list)
+        table.clear(ShoppingList)
+        for _, name in ipairs(list) do
+            table.insert(ShoppingList, name)
+        end
+    end
+})
+purchaseDiv:AddDropdown({
+    Text = "Purchase Order",
+    Items = {"Low to High", "High to Low"},
+    Default = "High to Low",
+    StateKey = "purchaseOrder",
+    Callback = function(sel)
+        FarmTogs.PurchaseHighToLow = (sel == "High to Low")
+    end
+})
+purchaseDiv:AddSlider({ Text = "Purchase Delay", Min = 5, Max = 30, Default = 10, StateKey = "purchaseDelay", Callback = function(v)
+    PurchaseDelay = v
+end })
+purchaseDiv:AddTextBox({
+    Text = "Purchase Amount",
+    Placeholder = "20",
+    Default = "20",
+    StateKey = "buyQty",
+    Callback = function(str)
+        if not tonumber(str) or str == "" then
+            BuyQty = 20
+        else
+            BuyQty = tonumber(str)
+        end
+    end
+})
+purchaseDiv:AddButton({ Text = "Instant Buy Selected (No Truck)", Callback = function()
+    BuyStock()
+    win:Notify({ Title = "Purchase", Description = "Attempted instant purchase", Type = "success" })
+end })
+
+local autoDiv = mainTab:AddDivision({ Title = "Auto Trash & Arrest" })
+autoDiv:AddCheckbox({ Text = "Auto Empty Trash", Default = false, StateKey = "autoEmpty", Callback = function(bool)
+    FarmTogs.AutoEmpty = bool
+    if bool then
+        task.spawn(function()
+            while FarmTogs.AutoEmpty do
+                local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+                if hum and not DeliveryBusy and not hum.SeatPart then
+                    local back, moved = Player.Character.HumanoidRootPart.CFrame, false
+                    for _, bin in ipairs(MyBins()) do
+                        if not FarmTogs.AutoEmpty or DeliveryBusy or hum.SeatPart then break end
+                        if EmptyBin(bin) then moved = true end
+                    end
+                    if moved then Player.Character.HumanoidRootPart.CFrame = back end
+                end
+                task.wait(5)
+            end
+        end)
+    end
+end })
+autoDiv:AddCheckbox({ Text = "Auto Arrest Robbers", Default = false, StateKey = "autoArrest", Callback = function(bool)
+    FarmTogs.AutoArrest = bool
+    if bool then
+        task.spawn(function()
+            while FarmTogs.AutoArrest do
+                local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+                if hum and not DeliveryBusy and not hum.SeatPart then
+                    local back, moved = Player.Character.HumanoidRootPart.CFrame, false
+                    for _, npc in ipairs(MyRobbers()) do
+                        if not FarmTogs.AutoArrest or DeliveryBusy or hum.SeatPart then break end
+                        if ArrestRobber(npc) then moved = true end
+                    end
+                    if moved then Player.Character.HumanoidRootPart.CFrame = back end
+                end
+                task.wait(2)
+            end
+        end)
+    end
+end })
+
+local vehicleDiv = mainTab:AddDivision({ Title = "Vehicle Mods" })
+vehicleDiv:AddCheckbox({ Text = "Enabled", Default = false, StateKey = "vehicleModsEnabled", Callback = function(bool)
+    ModsOn = bool
+    ApplyMods()
+end })
+vehicleDiv:AddSlider({ Text = "MaxSpeed", Min = 20, Max = 500, Default = 100, StateKey = "vmod_maxspeed", Callback = function(v) VehicleMods.MaxSpeed = v; ApplyMods() end })
+vehicleDiv:AddSlider({ Text = "MaxSpeedRev", Min = 10, Max = 200, Default = 30, StateKey = "vmod_maxspeedrev", Callback = function(v) VehicleMods.MaxSpeedRev = v; ApplyMods() end })
+vehicleDiv:AddSlider({ Text = "Power", Min = 5, Max = 300, Default = 20, StateKey = "vmod_power", Callback = function(v) VehicleMods.Power = v; ApplyMods() end })
+vehicleDiv:AddSlider({ Text = "Torque", Min = 0.05, Max = 2, Default = 0.225, Float = true, Decimals = 3, StateKey = "vmod_torque", Callback = function(v) VehicleMods.Torque = v; ApplyMods() end })
+vehicleDiv:AddSlider({ Text = "BrakePower", Min = 5, Max = 300, Default = 30, StateKey = "vmod_brake", Callback = function(v) VehicleMods.BrakePower = v; ApplyMods() end })
+vehicleDiv:AddSlider({ Text = "MaxTurnAngle", Min = 10, Max = 80, Default = 45, StateKey = "vmod_turnangle", Callback = function(v) VehicleMods.MaxTurnAngle = v; ApplyMods() end })
+
+local toolsDiv = mainTab:AddDivision({ Title = "Tools & Player" })
+toolsDiv:AddButton({ Text = "Spawn Best Vehicle", Callback = function()
+    local truck, err = EnsureTruck()
+    if truck then win:Notify({ Title = "Vehicle", Description = "Spawned", Type = "success" })
+    else win:Notify({ Title = "Error", Description = err, Type = "error" }) end
+end })
+toolsDiv:AddButton({ Text = "Move Truck to Bay", Callback = function()
+    local bay = MyBay()
+    if bay and MoveTruck(bay.LoadingSpot.CFrame * CFrame.new(0, 4, 0)) then win:Notify({ Title = "Vehicle", Description = "Moved to bay", Type = "success" }) end
+end })
+toolsDiv:AddButton({ Text = "Move Truck to Unload", Callback = function()
+    local door = UnloadCFrame()
+    if door and MoveTruck(door) then win:Notify({ Title = "Vehicle", Description = "Moved to unload", Type = "success" }) end
+end })
+toolsDiv:AddButton({ Text = "Instant Load Vehicle", Callback = function()
+    LoadVehicle:InvokeServer()
+    win:Notify({ Title = "Vehicle", Description = "Loaded instantly", Type = "success" })
+end })
+toolsDiv:AddButton({ Text = "Instant Unload Vehicle", Callback = function()
+    UnloadVehicle:InvokeServer()
+    win:Notify({ Title = "Vehicle", Description = "Unloaded instantly", Type = "success" })
+end })
+toolsDiv:AddSlider({ Text = "WalkSpeed", Min = 16, Max = 200, Default = 16, StateKey = "walkspeed", Callback = function(v)
+    local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = v end
+end })
+toolsDiv:AddSlider({ Text = "JumpPower", Min = 50, Max = 200, Default = 50, StateKey = "jumppower", Callback = function(v)
+    local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.JumpPower = v end
+end })
+
+-- DIV 7: VISUALS (ESP)
+local espDiv = mainTab:AddDivision({ Title = "ESP Visuals" })
+local binsESP = false
+local robbersESP = false
+
+espDiv:AddCheckbox({ Text = "Highlight Trash Bins", Default = false, StateKey = "espBins", Callback = function(state)
+    binsESP = state
+    if not state then
+        for _, bin in ipairs(MyBins()) do
+            local h = bin:FindFirstChild("ESP_Highlight")
+            if h then h:Destroy() end
+        end
+    end
+end })
+espDiv:AddCheckbox({ Text = "Highlight Robbers", Default = false, StateKey = "espRobbers", Callback = function(state)
+    robbersESP = state
+    if not state then
+        for _, npc in ipairs(MyRobbers()) do
+            local h = npc:FindFirstChild("ESP_Highlight")
+            if h then h:Destroy() end
+        end
+    end
+end })
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if binsESP then
+            for _, bin in ipairs(MyBins()) do
+                if not bin:FindFirstChild("ESP_Highlight") then
+                    local h = Instance.new("Highlight")
+                    h.Name = "ESP_Highlight"
+                    h.FillColor = Color3.fromRGB(255, 165, 0) 
+                    h.OutlineColor = Color3.fromRGB(255, 255, 255)
+                    h.Parent = bin
+                end
+            end
+        end
+        if robbersESP then
+            for _, npc in ipairs(MyRobbers()) do
+                if not npc:FindFirstChild("ESP_Highlight") then
+                    local h = Instance.new("Highlight")
+                    h.Name = "ESP_Highlight"
+                    h.FillColor = Color3.fromRGB(255, 0, 0) 
+                    h.OutlineColor = Color3.fromRGB(255, 255, 255)
+                    h.Parent = npc
+                end
+            end
+        end
+    end
+end)
+
+pcall(function() win:LoadState() end)

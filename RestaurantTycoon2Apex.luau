@@ -95,7 +95,7 @@ repeat
         end
     end
     if not getgenv().PlayerPlot and os.clock() - plotWaitStart > 15 then
-        warn("[Script Info]: Could not find your restaurant plot after 15s. Make sure you're fully loaded into the game, then re-execute.")
+        warn("[Script Info]: Could not find your restaurant plot after 15s. Make sure you're fully loaded into the game and that your restaurant is loaded, then re-execute.")
         return
     end
 until getgenv().PlayerPlot
@@ -482,3 +482,5 @@ task.spawn(function()
 end)
 
 pcall(function() win:LoadState() end)
+
+--testtestestesttestestestestestestestestesteststestestestesteJNCVJNXVCBLJKJNXCVLBKJNHXCVJNXDFJUVXCJCHJSJDFHNVSKDFNJSJDNVCSJDJCSIKDJFSDJNHVSKIDJFKLSIDJFLSDJJHFLSIDJFLSKDNF,DBCV,JSJNDFLKJSAJNDF,SDBNFVJSNDVJSNVN VNVNVNVNVNSDJICVJLSDNVLSKDJNFLSKDJFLSKDJFLSKDJFLSKDJF

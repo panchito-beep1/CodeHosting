@@ -44,12 +44,7 @@ else
     warn("Unsupported game:", gameName, "| PlaceId:", placeId)
 end
 
-
-
-
-
-
-
-
-
---apex loader laoder hub hub hub github github apex apex apex bbb bbb bbb.
+----------------===================|for readers|===================----------------
+-- please for the love of god make sure your restaurant is loaded for the Restaurant Tycoon 2 script to work... I even added a check to tell if your restaurant is loaded; please don't make that mistake
+--
+--APEX v2.3 FULLY keyless.

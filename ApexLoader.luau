@@ -17,6 +17,18 @@ local games = {
     Name = "DOORS",     
     Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/DoorsApex.luau"
   },
+    [5865858426] = {
+    Name = "Retail Tycoon 2",     
+    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/APEXRetailTycoon2"
+  },
+    [9772878203] = {
+    Name = "raise a floppa 2",     
+    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/ApexRaiseAFlopp.luau"
+  },
+    [140317247681516] = {
+    Name = "Jump Clicker",     
+    Url = "https://raw.githubusercontent.com/panchito-beep1/CodeHosting/refs/heads/main/APEXJumpClicker.luau"
+  },
 }
 
 local placeId = game.PlaceId

